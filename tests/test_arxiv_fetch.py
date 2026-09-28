@@ -174,10 +174,27 @@ def test_search_retries_on_http_406_then_succeeds(monkeypatch):
         hdrs=None, fp=BytesIO(b""),
     )
     calls = _patch_urlopen(monkeypatch, mod, [err_406, VALID_XML])
+    monkeypatch.setattr(mod, "_curl_get", lambda url, headers, timeout: None)  # curl unavailable
 
     results = mod.search("2509.14933", max_results=1)
 
     assert calls["n"] == 2
+    assert results[0]["title"] == "Test Paper"
+
+
+def test_search_406_is_rescued_through_curl(monkeypatch):
+    """urllib refused with 406, curl gets the feed: one urllib call, no retry wait."""
+    mod = load_module()
+    err_406 = urllib.error.HTTPError(
+        url="http://example/", code=406, msg="Not Acceptable",
+        hdrs=None, fp=BytesIO(b""),
+    )
+    calls = _patch_urlopen(monkeypatch, mod, [err_406])
+    monkeypatch.setattr(mod, "_curl_get", lambda url, headers, timeout: VALID_XML)
+
+    results = mod.search("2509.14933", max_results=1)
+
+    assert calls["n"] == 1
     assert results[0]["title"] == "Test Paper"
 
 

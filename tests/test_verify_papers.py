@@ -111,3 +111,70 @@ def test_non_transient_4xx_still_short_circuits(monkeypatch):
 
     assert calls["n"] == 1
     assert result == {REAL_ID: "unverified"}
+
+
+# ── refusals, the curl transport, and the pending cache ─────────────────────
+
+def _counting_http_get(monkeypatch, mod, status, body=None):
+    calls = {"n": 0}
+
+    def fake_http_get(url, headers=None, timeout=30):
+        calls["n"] += 1
+        return status, body
+
+    monkeypatch.setattr(mod, "http_get", fake_http_get)
+    monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+    return calls
+
+
+def test_persistent_406_does_not_split_the_batch(monkeypatch):
+    """arXiv refusing the client answers every sub-batch the same way."""
+    mod = load_module()
+    calls = _counting_http_get(monkeypatch, mod, 406)
+    batch = [f"2401.{i:05d}" for i in range(40)]
+
+    out = mod._verify_arxiv_batch_with_retry(batch)
+
+    assert calls["n"] == 3
+    assert set(out.values()) == {"verify_pending"}
+
+
+def test_refusals_are_pending_in_every_layer(monkeypatch):
+    mod = load_module()
+    for status in (401, 403):
+        _counting_http_get(monkeypatch, mod, status)
+        assert set(mod._verify_arxiv_batch_with_retry(["1706.03762"]).values()) == {"verify_pending"}
+        assert mod.verify_doi("10.1000/x", "a@b.c") == "verify_pending"
+        assert mod.verify_title_s2("Attention Is All You Need", 0.7) == ("verify_pending", None)
+
+
+def test_http_get_rescues_406_through_curl(monkeypatch):
+    import urllib.error
+    from io import BytesIO
+    mod = load_module()
+
+    def refuse(req, timeout=30):
+        raise urllib.error.HTTPError(url="http://x/", code=406, msg="Not Acceptable", hdrs=None, fp=BytesIO(b""))
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(mod, "_curl_get", lambda url, headers, timeout: b"<feed/>")
+    assert mod.http_get("https://export.arxiv.org/api/query?id_list=1") == (200, "<feed/>")
+
+    monkeypatch.setattr(mod, "_curl_get", lambda url, headers, timeout: None)
+    assert mod.http_get("https://export.arxiv.org/api/query?id_list=1") == (406, None)
+
+
+def test_cached_pending_is_asked_again(monkeypatch):
+    """A verify_pending written during an outage must not answer for the next 30 days."""
+    mod = load_module()
+    feed = "<feed><entry><id>http://arxiv.org/abs/1706.03762v7</id></entry></feed>"
+    calls = _counting_http_get(monkeypatch, mod, 200, feed)
+    cache = {"arxiv:1706.03762": {"status": "verify_pending", "reason": "arxiv_verify_pending", "ts": 0}}
+    paper = mod.PaperInput(id="p1", arxiv_id="1706.03762")
+
+    (result,) = mod.verify_papers([paper], arxiv_batch_size=40, fuzzy_threshold=0.6,
+                                  user_email="a@b.c", cache=cache)
+
+    assert calls["n"] == 1
+    assert result.status == "verified"
+    assert cache["arxiv:1706.03762"]["status"] == "verified"
