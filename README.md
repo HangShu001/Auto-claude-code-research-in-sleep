@@ -1670,6 +1670,22 @@ Plug your library / vault / notifications into ARIS — each auto-skips silently
 
 Skills are plain Markdown — fork and tune them. Per-skill environment variables (GPU target, code review, reviewer routing, human checkpoints, paper-writing knobs) and parameter pass-through live in **[docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md)**.
 
+<a id="deliberate-starts"></a>
+
+**Reviewer quota tight?** The defaults are chosen for quality and stay as they are: skills start from natural language, and every review goes to the cross-model reviewer at its full tier. If a casual sentence starting a skill costs you quota, these are yours to opt into:
+
+| Option | Saves | Costs |
+|---|---|---|
+| Paste the paragraph below into your project's `CLAUDE.md` | Skills starting from a sentence that merely resembles a trigger | You name the skill to start it. It is guidance to the model, not a guarantee |
+| `— reviewer: manual` | Every reviewer call | You paste the review in yourself, so no unattended overnight run |
+| `— effort: lite` | Papers read, ideas generated, rounds run | Nothing on the reviewer: its tier is never lowered |
+
+```
+Start ARIS skills or external reviewers only when I name an ARIS skill or explicitly
+request an ARIS workflow. That request includes its child skills and reviewers;
+continue under AUTO_PROCEED without asking for confirmation.
+```
+
 <a id="alternative-model-combinations"></a>
 
 ## 11. 🔀 Alternative Model Combinations

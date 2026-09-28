@@ -1457,6 +1457,22 @@ cp -r skills/experiment-bridge ~/.claude/skills/
 
 Skills 都是纯 Markdown,fork 了随便改。各 skill 的环境变量(GPU 目标、代码审查、reviewer 路由、人工检查点、论文写作开关)和参数透传详见 **[docs/CUSTOMIZATION_CN.md](docs/CUSTOMIZATION_CN.md)**。
 
+<a id="deliberate-starts"></a>
+
+**审稿额度紧张？** 默认配置是为质量选的，不会改：skill 能被自然语言触发，每次审阅都按完整档位交给跨模型审稿人。如果随口一句话启动 skill 让你的额度吃紧，下面这些由你自己选择是否启用：
+
+| 选项 | 省什么 | 代价 |
+|---|---|---|
+| 把下面这段话粘进项目的 `CLAUDE.md` | 只是像触发词的一句话误启动 skill | 要点名 skill 才启动。这是给模型的指引，不是硬保证 |
+| `— reviewer: manual` | 全部审稿调用 | 审稿意见由你自己贴进去，所以做不到过夜无人值守 |
+| `— effort: lite` | 读的论文数、生成的 idea 数、跑的轮次 | 审稿人那边不省：它的档位永远不会被降低 |
+
+```
+Start ARIS skills or external reviewers only when I name an ARIS skill or explicitly
+request an ARIS workflow. That request includes its child skills and reviewers;
+continue under AUTO_PROCEED without asking for confirmation.
+```
+
 <a id="alternative-model-combinations"></a>
 
 ## 11. 🔀 替代模型组合
