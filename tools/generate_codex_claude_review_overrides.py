@@ -262,6 +262,9 @@ def transform_body(text: str) -> str:
     text = text.replace('"agent_id"', '"thread_id"')
     text = text.replace("ALWAYS use `reasoning_effort: xhigh` for reviews", "Always ask the Claude reviewer for strict, high-rigor feedback.")
     text = text.replace("ALWAYS use `reasoning_effort: xhigh` for maximum reasoning depth", "Always ask the Claude reviewer for strict, high-rigor feedback.")
+    # the Codex tier-pinning bullet has no meaning for a Claude reviewer
+    text = re.sub(r"^- ALWAYS pin `model: [^`]+` \+ `reasoning_effort: xhigh`.*$",
+                  "- Always ask the Claude reviewer for strict, high-rigor feedback.", text, flags=re.MULTILINE)
     text = text.replace("mcp__codex__codex-reply", "mcp__claude-review__review_reply_start")
     text = text.replace("mcp__codex__codex", "mcp__claude-review__review_start")
     text = re.sub(r"^-\s+\*{0,2}REVIEWER_MODEL.*$", REVIEWER_LINE, text, flags=re.MULTILINE)

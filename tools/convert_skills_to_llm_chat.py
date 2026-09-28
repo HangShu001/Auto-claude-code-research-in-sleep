@@ -156,6 +156,9 @@ def convert_content(text: str) -> str:
                 text = text[:fm_end + 1] + note + text[fm_end + 1:]
 
     # 5. Clean up multiple blank lines from removed lines
+    # the Codex tier-pinning bullet (auto-review-loop) has no meaning for an HTTP reviewer
+    text = re.sub(r"^- \*\*Codex backend:\*\* pin `model: [^`]+` \+ `config: .*$",
+                  "- ALWAYS ask the LLM reviewer for strict, high-rigor feedback", text, flags=re.MULTILINE)
     text = re.sub(r'\n{3,}', '\n\n', text)
 
     return text
