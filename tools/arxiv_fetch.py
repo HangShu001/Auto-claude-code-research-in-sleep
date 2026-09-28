@@ -114,7 +114,8 @@ def _fetch_atom(url: str) -> ET.Element:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 body = resp.read()
         except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt < 3:
+            # export.arxiv.org returns 406 intermittently; it is not permanent.
+            if e.code in (406, 408, 429) and attempt < 3:
                 time.sleep(5 * attempt)
                 continue
             raise RuntimeError(f"arXiv API fetch failed: {e}")

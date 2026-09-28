@@ -237,7 +237,12 @@ def http_get(url: str, headers: dict[str, str] | None = None, timeout: int = 30)
 
 
 def is_transient(status: int) -> bool:
-    return status == -1 or status == 429 or 500 <= status < 600
+    # export.arxiv.org returns 406 Not Acceptable intermittently: the same URL
+    # alternates between 200 and 406 seconds apart, for IDs that exist and IDs
+    # that do not alike (a missing ID is 200 + 0 results, never 406). Whatever
+    # the cause, it is not a permanent client error — treating it as one marks a
+    # whole batch of real papers "unverified", a false fabrication signal.
+    return status == -1 or status in (406, 408, 429) or 500 <= status < 600
 
 
 def backoff(attempt: int) -> float:
