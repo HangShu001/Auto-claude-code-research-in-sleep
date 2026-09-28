@@ -256,6 +256,8 @@ fn rand_suffix() -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     use std::time::{SystemTime, UNIX_EPOCH};
+    // Two extractions inside one clock tick must not share a temp dir.
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
@@ -263,6 +265,9 @@ fn rand_suffix() -> String {
     let mut h = DefaultHasher::new();
     nanos.hash(&mut h);
     std::process::id().hash(&mut h);
+    COUNTER
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        .hash(&mut h);
     format!("{:08x}", h.finish() as u32)
 }
 

@@ -354,7 +354,7 @@ fn accumulate_tool_call(pending: &mut Vec<(String, String, String)>, tc: &Value)
             }
         }
         if let Some(args) = func.get("arguments").and_then(|a| a.as_str()) {
-            pending[idx].2.push_str(args);
+            api::append_tool_input_chunk(&mut pending[idx].2, args);
         }
     }
 }
@@ -1327,7 +1327,7 @@ fn convert_messages_openai(
                             }));
                         }
                         ContentBlock::ToolResult { .. } => {}
-                        ContentBlock::Thinking { .. } => {}
+                        ContentBlock::Thinking { .. } | ContentBlock::RedactedThinking { .. } => {}
                     }
                 }
 
@@ -1691,6 +1691,23 @@ mod tests {
     }
 
     // Tool-call delta accumulation across chunks.
+    /// v0.4.28 (#444): a relay's `{}` placeholder chunk is replaced by the
+    /// real arguments, per slot; a call whose arguments really are `{}` stays.
+    #[test]
+    fn accumulate_tool_call_drops_a_placeholder_per_slot() {
+        let mut pending = Vec::new();
+        for tc in [
+            json!({"index": 0, "id": "a", "function": {"name": "bash", "arguments": "{}"}}),
+            json!({"index": 1, "id": "b", "function": {"name": "todo_read", "arguments": "{}"}}),
+            json!({"index": 0, "function": {"arguments": "{\"command\":"}}),
+            json!({"index": 0, "function": {"arguments": "\"ls\"}"}}),
+        ] {
+            accumulate_tool_call(&mut pending, &tc);
+        }
+        assert_eq!(pending[0].2, r#"{"command":"ls"}"#);
+        assert_eq!(pending[1].2, "{}");
+    }
+
     #[test]
     fn accumulate_tool_call_builds_and_concatenates() {
         use serde_json::json;

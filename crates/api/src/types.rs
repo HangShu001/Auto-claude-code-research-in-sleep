@@ -56,6 +56,11 @@ pub struct MessageRequest {
     pub tool_choice: Option<ToolChoice>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stream: bool,
+    /// Sent only when `ARIS_REASONING_EFFORT` is set (see `tuning`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_config: Option<Value>,
 }
 
 impl MessageRequest {
@@ -151,6 +156,10 @@ pub enum InputContentBlock {
         #[serde(default)]
         signature: String,
     },
+    /// Thinking the API returned encrypted. It goes back unchanged.
+    RedactedThinking {
+        data: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -216,6 +225,10 @@ pub enum OutputContentBlock {
         // See InputContentBlock::Thinking above — same proxy-compat reason.
         #[serde(default)]
         signature: String,
+    },
+    /// Thinking the API returned encrypted. It goes back unchanged.
+    RedactedThinking {
+        data: String,
     },
 }
 

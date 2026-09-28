@@ -4814,6 +4814,7 @@ fn render_turn_replay(
                         // sentinels lock this for the live path).
                         ContentBlock::Text { .. }
                         | ContentBlock::Thinking { .. }
+                        | ContentBlock::RedactedThinking { .. }
                         | ContentBlock::ToolResult { .. } => {}
                     }
                 }
@@ -4936,6 +4937,7 @@ fn render_export_text(session: &Session) -> String {
                 ContentBlock::Thinking { thinking, .. } => {
                     lines.push(format!("[thinking] {thinking}"));
                 }
+                ContentBlock::RedactedThinking { .. } => {}
             }
         }
         lines.push(String::new());
@@ -5601,6 +5603,7 @@ fn build_runtime(
 
     let feature_config = build_runtime_feature_config()?;
     let event_sink = build_event_sink(&feature_config);
+    let auto_compact = runtime::auto_compact_enabled_from_settings();
     Ok(ConversationRuntime::new_with_features(
         session,
         executor,
@@ -5609,6 +5612,7 @@ fn build_runtime(
         system_prompt,
         feature_config,
     )
+    .with_auto_compaction_enabled(auto_compact)
     .with_event_sink(event_sink))
 }
 
@@ -5758,9 +5762,11 @@ fn resolve_cli_auth_source() -> Result<AuthSource, Box<dyn std::error::Error>> {
 impl ApiClient for AnthropicRuntimeClient {
     #[allow(clippy::too_many_lines)]
     fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        let default_max_tokens = max_tokens_for_model(&self.model);
+        let (thinking, output_config) = api::anthropic_effort_from_env(&self.model);
         let message_request = MessageRequest {
             model: self.model.clone(),
-            max_tokens: max_tokens_for_model(&self.model),
+            max_tokens: api::streaming_max_tokens(default_max_tokens),
             messages: convert_messages(&request.messages),
             system: if request.system_prompt.is_empty() {
                 None
@@ -5798,6 +5804,8 @@ impl ApiClient for AnthropicRuntimeClient {
             }),
             tool_choice: self.enable_tools.then_some(ToolChoice::Auto),
             stream: true,
+            thinking,
+            output_config,
         };
 
         self.runtime.block_on(async {
@@ -5828,6 +5836,7 @@ impl ApiClient for AnthropicRuntimeClient {
             let mut events = Vec::new();
             let mut pending_tool: Option<(String, String, String)> = None;
             let mut pending_thinking: Option<(String, String)> = None;
+            let mut stop_reason: Option<String> = None;
             let mut saw_stop = false;
             // v0.4.10 T35: cache initial input/cache token usage from
             // MessageStart so the eventual MessageDelta can merge them
@@ -5888,7 +5897,7 @@ impl ApiClient for AnthropicRuntimeClient {
                         }
                         ContentBlockDelta::InputJsonDelta { partial_json } => {
                             if let Some((_, _, input)) = &mut pending_tool {
-                                input.push_str(&partial_json);
+                                api::append_tool_input_chunk(input, &partial_json);
                             }
                         }
                         ContentBlockDelta::ThinkingDelta { thinking } => {
@@ -5923,6 +5932,9 @@ impl ApiClient for AnthropicRuntimeClient {
                         }
                     }
                     ApiStreamEvent::MessageDelta(delta) => {
+                        if delta.delta.stop_reason.is_some() {
+                            stop_reason.clone_from(&delta.delta.stop_reason);
+                        }
                         // v0.4.10 T35 / C8 landmine fix: merge the
                         // earlier MessageStart usage (input/cache) with
                         // this delta's output_tokens before emitting,
@@ -5965,6 +5977,12 @@ impl ApiClient for AnthropicRuntimeClient {
                 }
             }
 
+            // Checked before the recovery request below: a stream may end on a
+            // `stop_reason` delta without `message_stop`.
+            runtime::ensure_answer_within_output_cap(&events, stop_reason.as_deref(), || {
+                api::output_cap_exhausted_message(message_request.max_tokens)
+            })?;
+
             if !saw_stop
                 && events.iter().any(|event| {
                     matches!(event, AssistantEvent::TextDelta(text) if !text.is_empty())
@@ -5981,15 +5999,23 @@ impl ApiClient for AnthropicRuntimeClient {
                 return Ok(events);
             }
 
+            let recovery_max_tokens =
+                api::recovery_max_tokens(message_request.max_tokens, default_max_tokens);
             let response = self
                 .client
                 .send_message(&MessageRequest {
                     stream: false,
+                    max_tokens: recovery_max_tokens,
                     ..message_request.clone()
                 })
                 .await
                 .map_err(|error| RuntimeError::new(error.to_string()))?;
-            response_to_events(response, out)
+            let stop_reason = response.stop_reason.clone();
+            let events = response_to_events(response, out)?;
+            runtime::ensure_answer_within_output_cap(&events, stop_reason.as_deref(), || {
+                api::output_cap_exhausted_message(recovery_max_tokens)
+            })?;
+            Ok(events)
         })
     }
 }
@@ -6651,6 +6677,9 @@ fn push_output_block(
                 signature,
             });
         }
+        OutputContentBlock::RedactedThinking { data } => {
+            events.push(AssistantEvent::RedactedThinking { data });
+        }
     }
     Ok(())
 }
@@ -7129,6 +7158,9 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
                         thinking: thinking.clone(),
                         signature: signature.clone(),
                     },
+                    ContentBlock::RedactedThinking { data } => {
+                        InputContentBlock::RedactedThinking { data: data.clone() }
+                    }
                 })
                 .collect::<Vec<_>>();
             (!content.is_empty()).then(|| InputMessage {

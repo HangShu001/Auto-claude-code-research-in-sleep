@@ -358,6 +358,13 @@ impl RuntimeConfig {
         self.merged.get(key)
     }
 
+    /// `autoCompactEnabled` from the merged settings; only an explicit
+    /// `false` turns automatic compaction off.
+    #[must_use]
+    pub fn auto_compact_enabled(&self) -> bool {
+        !matches!(self.get("autoCompactEnabled"), Some(JsonValue::Bool(false)))
+    }
+
     #[must_use]
     pub fn as_json(&self) -> JsonValue {
         JsonValue::Object(self.merged.clone())
@@ -1002,6 +1009,17 @@ fn deep_merge_objects(
     }
 }
 
+/// `autoCompactEnabled` for the current directory's merged settings. Settings
+/// are read when a session (or subagent) starts, so a change applies to the
+/// next one. Unreadable settings leave automatic compaction on.
+#[must_use]
+pub fn auto_compact_enabled_from_settings() -> bool {
+    std::env::current_dir()
+        .ok()
+        .and_then(|cwd| ConfigLoader::default_for(cwd).load().ok())
+        .is_none_or(|config| config.auto_compact_enabled())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1026,6 +1044,28 @@ mod tests {
             .expect("time should be after epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("runtime-config-{nanos}"))
+    }
+
+    #[test]
+    fn auto_compact_enabled_is_off_only_for_an_explicit_false() {
+        for (settings, expected) in [
+            (None, true),
+            (Some(r#"{"autoCompactEnabled": true}"#), true),
+            (Some(r#"{"autoCompactEnabled": false}"#), false),
+            (Some(r#"{"model": "opus"}"#), true),
+        ] {
+            let root = temp_dir().join(format!("compact-{expected}-{}", settings.map_or(0, str::len)));
+            let cwd = root.join("project");
+            let home = root.join("home").join(".claude");
+            fs::create_dir_all(&cwd).expect("project dir");
+            fs::create_dir_all(&home).expect("home config dir");
+            if let Some(settings) = settings {
+                fs::write(home.join("settings.json"), settings).expect("write settings");
+            }
+            let config = ConfigLoader::new(&cwd, &home).load().expect("load");
+            assert_eq!(config.auto_compact_enabled(), expected, "{settings:?}");
+            fs::remove_dir_all(root).expect("cleanup");
+        }
     }
 
     #[test]

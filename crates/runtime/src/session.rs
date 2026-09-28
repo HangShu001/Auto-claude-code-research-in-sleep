@@ -34,6 +34,10 @@ pub enum ContentBlock {
         thinking: String,
         signature: String,
     },
+    /// Thinking the API returned encrypted; replayed unchanged.
+    RedactedThinking {
+        data: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -319,6 +323,13 @@ impl ContentBlock {
                 object.insert("output".to_string(), JsonValue::String(output.clone()));
                 object.insert("is_error".to_string(), JsonValue::Bool(*is_error));
             }
+            Self::RedactedThinking { data } => {
+                object.insert(
+                    "type".to_string(),
+                    JsonValue::String("redacted_thinking".to_string()),
+                );
+                object.insert("data".to_string(), JsonValue::String(data.clone()));
+            }
             Self::Thinking {
                 thinking,
                 signature,
@@ -365,6 +376,9 @@ impl ContentBlock {
                     .get("is_error")
                     .and_then(JsonValue::as_bool)
                     .ok_or_else(|| SessionError::Format("missing is_error".to_string()))?,
+            }),
+            "redacted_thinking" => Ok(Self::RedactedThinking {
+                data: required_string(object, "data")?,
             }),
             "thinking" => Ok(Self::Thinking {
                 thinking: required_string(object, "thinking")?,
@@ -471,6 +485,9 @@ mod tests {
             .messages
             .push(ConversationMessage::assistant_with_usage(
                 vec![
+                    ContentBlock::RedactedThinking {
+                        data: "ENCRYPTED".to_string(),
+                    },
                     ContentBlock::Text {
                         text: "thinking".to_string(),
                     },

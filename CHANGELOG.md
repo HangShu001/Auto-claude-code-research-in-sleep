@@ -1,5 +1,57 @@
 # ARIS-Code Changelog
 
+## v0.4.28 (2026-09-28)
+
+Settings that were documented or exposed but not connected now take effect,
+and two connection problems are fixed. With none of the settings below set,
+requests are unchanged.
+
+### Upgrading from v0.4.27 — check these three
+
+- **You already export `ARIS_REASONING_EFFORT`** (for the OpenAI channel or
+  the reviewer) and your executor is on the Anthropic channel: the executor
+  now uses it too. Expect more thinking tokens; a relay that does not accept
+  `thinking` / `output_config` answers 400 — unset the variable for that
+  setup.
+- **Your OS has a proxy configured**: ARIS now goes through it. To connect
+  directly as before, set `NO_PROXY=*` (or list the hosts). `HTTPS_PROXY` /
+  `HTTP_PROXY` still take precedence over the OS setting.
+- **Your settings already contain `autoCompactEnabled: false`**: it had no
+  effect before and now turns automatic compaction off. Remove it, or run
+  `/compact` yourself in long sessions.
+
+### Changes
+
+- **`ARIS_REASONING_EFFORT` on the Anthropic channel (#446).** It used to
+  reach only the OpenAI-compatible channel. Set to `low` / `medium` / `high` /
+  `xhigh` / `max`, the main session and subagents now send
+  `output_config.effort` with adaptive thinking. Accepted by Fable / Mythos 5,
+  Opus 5 / 4.8 / 4.7, Sonnet 5, and Opus / Sonnet 4.6 (`xhigh` is sent as
+  `high` there); Opus 4.5 takes `low` / `medium` / `high`. On other models
+  the request goes out without it and one note is printed. `none` / `minimal` are sent as `low`. `budget_tokens` is
+  not used: current Claude models reject it.
+- **`ARIS_MAX_TOKENS`** overrides the per-request output cap on the Anthropic
+  channel (defaults stay 32 000 for Opus and subagents, 64 000 otherwise).
+  Raise it when a high effort level runs into the cap.
+- **`autoCompactEnabled: false`** in settings turns automatic compaction off
+  for the main session and subagents. Read at session start; `/compact`
+  still works.
+- **Tool calls through relays that send a `{}` placeholder (#444).** The
+  placeholder was glued in front of the real arguments and every tool call
+  failed with `invalid tool input JSON: trailing characters at line 1 column
+  3`. Fixed on the Anthropic and OpenAI-compatible channels.
+- **System proxy on Windows and macOS (#401, by @JasmineLCY).** The proxy
+  configured in the OS is used without exporting `HTTPS_PROXY`.
+- A response that spends its whole output cap on thinking now ends the turn
+  with an error naming `ARIS_MAX_TOKENS`, instead of finishing with no
+  answer (a subagent used to report an empty result as completed).
+- Encrypted (`redacted_thinking`) blocks are carried through and sent back;
+  a response containing one used to fail to parse.
+- Subagents keep the text and signature of their thinking blocks (they were
+  dropped from the stream).
+- Tests: api 42+6 / aris-cli 227 + 4 e2e / runtime 254 / tools 73. Two test
+  races fixed (web-search env var, cache temp dir).
+
 ## v0.4.27 (2026-09-19)
 
 Patch for the #439 follow-up: launching the REPL and quitting no longer leaves

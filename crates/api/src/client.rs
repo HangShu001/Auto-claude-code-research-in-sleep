@@ -800,6 +800,7 @@ fn event_is_meaningful_content(event: &StreamEvent) -> bool {
         StreamEvent::ContentBlockStart(e) => match &e.content_block {
             OutputContentBlock::Text { text } => !text.is_empty(),
             OutputContentBlock::Thinking { thinking, .. } => !thinking.is_empty(),
+            OutputContentBlock::RedactedThinking { data } => !data.is_empty(),
             // ToolUse start commits caller pending_tool state — see doc above.
             OutputContentBlock::ToolUse { .. } => true,
         },
@@ -1508,6 +1509,57 @@ mod tests {
         std::env::remove_var("ARIS_DISABLE_KEYCHAIN");
     }
 
+    /// v0.4.28: encrypted thinking parses from a response and serializes back
+    /// into a request unchanged.
+    #[test]
+    fn redacted_thinking_round_trips() {
+        let block: crate::types::OutputContentBlock =
+            serde_json::from_str(r#"{"type":"redacted_thinking","data":"ENCRYPTED"}"#)
+                .expect("parse");
+        assert_eq!(
+            block,
+            crate::types::OutputContentBlock::RedactedThinking {
+                data: "ENCRYPTED".to_string()
+            }
+        );
+        let back = crate::types::InputContentBlock::RedactedThinking {
+            data: "ENCRYPTED".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_string(&back).expect("serialize"),
+            r#"{"type":"redacted_thinking","data":"ENCRYPTED"}"#
+        );
+    }
+
+    #[test]
+    fn request_body_has_no_effort_fields_unless_they_are_set() {
+        let request = MessageRequest {
+            model: "claude-opus-4-8".to_string(),
+            max_tokens: 64,
+            messages: vec![],
+            system: None,
+            tools: None,
+            tool_choice: None,
+            stream: true,
+            thinking: None,
+            output_config: None,
+        };
+        // Unset: the body is exactly what v0.4.27 sent.
+        assert_eq!(
+            serde_json::to_string(&request).expect("serialize"),
+            r#"{"model":"claude-opus-4-8","max_tokens":64,"messages":[],"stream":true}"#
+        );
+        let with_effort = MessageRequest {
+            thinking: Some(serde_json::json!({"type": "adaptive"})),
+            output_config: Some(serde_json::json!({"effort": "xhigh"})),
+            ..request
+        };
+        assert_eq!(
+            serde_json::to_string(&with_effort).expect("serialize"),
+            r#"{"model":"claude-opus-4-8","max_tokens":64,"messages":[],"stream":true,"thinking":{"type":"adaptive"},"output_config":{"effort":"xhigh"}}"#
+        );
+    }
+
     #[test]
     fn message_request_stream_helper_sets_stream_true() {
         let request = MessageRequest {
@@ -1518,6 +1570,8 @@ mod tests {
             tools: None,
             tool_choice: None,
             stream: false,
+            thinking: None,
+            output_config: None,
         };
 
         assert!(request.with_streaming().stream);

@@ -159,7 +159,9 @@ fn summarize_messages(messages: &[ConversationMessage]) -> String {
         .filter_map(|block| match block {
             ContentBlock::ToolUse { name, .. } => Some(name.as_str()),
             ContentBlock::ToolResult { tool_name, .. } => Some(tool_name.as_str()),
-            ContentBlock::Text { .. } | ContentBlock::Thinking { .. } => None,
+            ContentBlock::Text { .. }
+            | ContentBlock::Thinking { .. }
+            | ContentBlock::RedactedThinking { .. } => None,
         })
         .collect::<Vec<_>>();
     tool_names.sort_unstable();
@@ -240,6 +242,7 @@ fn summarize_block(block: &ContentBlock) -> String {
             if *is_error { "error " } else { "" }
         ),
         ContentBlock::Thinking { thinking, .. } => thinking.clone(),
+        ContentBlock::RedactedThinking { .. } => String::new(),
     };
     truncate_summary(&raw, 160)
 }
@@ -292,6 +295,7 @@ fn collect_key_files(messages: &[ConversationMessage]) -> Vec<String> {
             ContentBlock::ToolUse { input, .. } => input.as_str(),
             ContentBlock::ToolResult { output, .. } => output.as_str(),
             ContentBlock::Thinking { thinking, .. } => thinking.as_str(),
+            ContentBlock::RedactedThinking { .. } => "",
         })
         .flat_map(extract_file_candidates)
         .collect::<Vec<_>>();
@@ -315,7 +319,8 @@ fn first_text_block(message: &ConversationMessage) -> Option<&str> {
         ContentBlock::ToolUse { .. }
         | ContentBlock::ToolResult { .. }
         | ContentBlock::Text { .. }
-        | ContentBlock::Thinking { .. } => None,
+        | ContentBlock::Thinking { .. }
+        | ContentBlock::RedactedThinking { .. } => None,
     })
 }
 
@@ -368,6 +373,7 @@ fn estimate_message_tokens(message: &ConversationMessage) -> usize {
             ContentBlock::Thinking {
                 thinking, signature,
             } => (thinking.len() + signature.len()) / 4 + 1,
+            ContentBlock::RedactedThinking { data } => data.len() / 4 + 1,
         })
         .sum()
 }

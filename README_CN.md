@@ -29,6 +29,8 @@
 
 ## 📰 最新动态
 
+> **v0.4.28** (2026-09-28) — **`ARIS_REASONING_EFFORT` 在 Anthropic 通道生效**([#446](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/issues/446)):`low` / `medium` / `high` / `xhigh` / `max`,主会话和子代理都支持(Fable / Mythos 5、Opus 5 / 4.8 / 4.7、Sonnet 5、Opus / Sonnet 4.6);不设置则请求不变。**`ARIS_MAX_TOKENS`** 调高输出上限,effort 高到撞上限时用。settings 里 **`autoCompactEnabled: false`** 关闭自动压缩(下次会话生效;`/compact` 照常可用)。**🐛 [#444](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/issues/444)** 经由会先发 `{}` 占位符的中转站时,工具调用不再报 `invalid tool input JSON`。**🌐 系统代理**:Windows / macOS 的系统代理直接生效,不用再导出 `HTTPS_PROXY`([#401](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/pull/401),by @JasmineLCY);想照旧直连就设 `NO_PROXY=*`。**升级前看一眼:**已经导出过 `ARIS_REASONING_EFFORT`、系统里配了代理、或 settings 里写过 `autoCompactEnabled: false` 的,见[升级说明](CHANGELOG.md)。
+>
 > **v0.4.27** (2026-09-19) — 启动 REPL 后直接退出不再留下空的 session 文件;`/resume` 只列出有消息的会话([#439](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/issues/439) 后续)。
 
 > **v0.4.26** (2026-09-16) — **Fable 5.1**:`fable` 别名现在指向 `claude-fable-5-1`,`/model` 菜单把 Fable 5.1 放在第一位(Fable 5 仍可选);默认 executor 仍是 `claude-opus-5`。

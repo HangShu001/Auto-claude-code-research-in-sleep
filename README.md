@@ -29,6 +29,8 @@
 
 ## 📰 What's New
 
+> **v0.4.28** (2026-09-28) — **`ARIS_REASONING_EFFORT` now works on the Anthropic channel** ([#446](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/issues/446)): `low` / `medium` / `high` / `xhigh` / `max` for the main session and subagents (Fable / Mythos 5, Opus 5 / 4.8 / 4.7, Sonnet 5, Opus / Sonnet 4.6); unset, requests are unchanged. **`ARIS_MAX_TOKENS`** raises the output cap when a high effort runs into it. **`autoCompactEnabled: false`** in settings turns automatic compaction off (next session; `/compact` still works). **🐛 [#444](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/issues/444)** tool calls through relays that send a `{}` placeholder no longer fail with `invalid tool input JSON`. **🌐 System proxy** on Windows / macOS is used without exporting `HTTPS_PROXY` ([#401](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/pull/401), by @JasmineLCY); `NO_PROXY=*` connects directly as before. **Upgrading:** if you already export `ARIS_REASONING_EFFORT`, have an OS proxy, or have `autoCompactEnabled: false` in settings, read the [upgrade notes](CHANGELOG.md).
+>
 > **v0.4.27** (2026-09-19) — launching and quitting the REPL no longer leaves an empty session file; `/resume` lists only sessions with messages ([#439](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep/issues/439) follow-up).
 
 > **v0.4.26** (2026-09-16) — **Fable 5.1**: the `fable` alias now means `claude-fable-5-1` and `/model` lists Fable 5.1 first (Fable 5 stays selectable); the default executor remains `claude-opus-5`.

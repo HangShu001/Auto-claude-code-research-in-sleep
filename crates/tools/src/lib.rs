@@ -2205,7 +2205,8 @@ fn build_agent_runtime(
         tool_executor,
         agent_permission_policy(),
         job.system_prompt.clone(),
-    ))
+    )
+    .with_auto_compaction_enabled(runtime::auto_compact_enabled_from_settings()))
 }
 
 fn build_agent_system_prompt(subagent_type: &str) -> Result<Vec<String>, String> {
@@ -2404,9 +2405,10 @@ impl ApiClient for AnthropicRuntimeClient {
                 input_schema: spec.input_schema,
             })
             .collect::<Vec<_>>();
+        let (thinking, output_config) = api::anthropic_effort_from_env(&self.model);
         let mut message_request = MessageRequest {
             model: self.model.clone(),
-            max_tokens: 32_000,
+            max_tokens: api::streaming_max_tokens(SUBAGENT_DEFAULT_MAX_TOKENS),
             messages: convert_messages(&request.messages),
             system: if request.system_prompt.is_empty() {
                 None
@@ -2416,6 +2418,8 @@ impl ApiClient for AnthropicRuntimeClient {
             tools: (!tools.is_empty()).then_some(tools),
             tool_choice: (!self.allowed_tools.is_empty()).then_some(ToolChoice::Auto),
             stream: true,
+            thinking,
+            output_config,
         };
 
         self.runtime.block_on(async {
@@ -2441,70 +2445,33 @@ impl ApiClient for AnthropicRuntimeClient {
                         );
                         self.model = next.to_string();
                         message_request.model = next.to_string();
+                        // the effort fields follow the model actually sent
+                        (message_request.thinking, message_request.output_config) =
+                            api::anthropic_effort_from_env(next);
                     }
                     Err(error) => return Err(RuntimeError::new(error.to_string())),
                 }
             };
-            let mut events = Vec::new();
-            let mut pending_tool: Option<(String, String, String)> = None;
-            let mut saw_stop = false;
-
+            let mut fold = SubagentStreamFold::default();
             while let Some(event) = stream
                 .next_event()
                 .await
                 .map_err(|error| RuntimeError::new(error.to_string()))?
             {
-                match event {
-                    ApiStreamEvent::MessageStart(start) => {
-                        for block in start.message.content {
-                            push_output_block(block, &mut events, &mut pending_tool, true);
-                        }
-                    }
-                    ApiStreamEvent::ContentBlockStart(start) => {
-                        push_output_block(
-                            start.content_block,
-                            &mut events,
-                            &mut pending_tool,
-                            true,
-                        );
-                    }
-                    ApiStreamEvent::ContentBlockDelta(delta) => match delta.delta {
-                        ContentBlockDelta::TextDelta { text } => {
-                            if !text.is_empty() {
-                                events.push(AssistantEvent::TextDelta(text));
-                            }
-                        }
-                        ContentBlockDelta::InputJsonDelta { partial_json } => {
-                            if let Some((_, _, input)) = &mut pending_tool {
-                                input.push_str(&partial_json);
-                            }
-                        }
-                        ContentBlockDelta::ThinkingDelta { .. } => {},
-                        ContentBlockDelta::SignatureDelta { .. } => {},
-                    },
-                    ApiStreamEvent::ContentBlockStop(_) => {
-                        if let Some((id, name, input)) = pending_tool.take() {
-                            events.push(AssistantEvent::ToolUse { id, name, input });
-                        }
-                    }
-                    ApiStreamEvent::MessageDelta(delta) => {
-                        events.push(AssistantEvent::Usage(TokenUsage {
-                            input_tokens: delta.usage.input_tokens,
-                            output_tokens: delta.usage.output_tokens,
-                            cache_creation_input_tokens: 0,
-                            cache_read_input_tokens: 0,
-                        }));
-                    }
-                    ApiStreamEvent::MessageStop(_) => {
-                        saw_stop = true;
-                        events.push(AssistantEvent::MessageStop);
-                    }
-                    ApiStreamEvent::Error(e) => {
-                        let msg = e.error.get("message").and_then(|v| v.as_str()).unwrap_or("stream error").to_string();
-                        return Err(RuntimeError::new(msg));
-                    }
-                }
+                fold.apply(event)?;
             }
+            let SubagentStreamFold {
+                mut events,
+                saw_stop,
+                stop_reason,
+                ..
+            } = fold;
+
+            // Checked before the recovery request below: a stream may end on a
+            // `stop_reason` delta without `message_stop`.
+            runtime::ensure_answer_within_output_cap(&events, stop_reason.as_deref(), || {
+                api::output_cap_exhausted_message(message_request.max_tokens)
+            })?;
 
             if !saw_stop
                 && events.iter().any(|event| {
@@ -2522,16 +2489,127 @@ impl ApiClient for AnthropicRuntimeClient {
                 return Ok(events);
             }
 
+            let recovery_max_tokens = api::recovery_max_tokens(
+                message_request.max_tokens,
+                SUBAGENT_DEFAULT_MAX_TOKENS,
+            );
             let response = self
                 .client
                 .send_message(&MessageRequest {
                     stream: false,
+                    max_tokens: recovery_max_tokens,
                     ..message_request.clone()
                 })
                 .await
                 .map_err(|error| RuntimeError::new(error.to_string()))?;
-            Ok(response_to_events(response))
+            let stop_reason = response.stop_reason.clone();
+            let events = response_to_events(response);
+            runtime::ensure_answer_within_output_cap(&events, stop_reason.as_deref(), || {
+                api::output_cap_exhausted_message(recovery_max_tokens)
+            })?;
+            Ok(events)
         })
+    }
+}
+
+const SUBAGENT_DEFAULT_MAX_TOKENS: u32 = 32_000;
+
+/// Folds a subagent's stream events into assistant events. Thinking text and
+/// its signature arrive as deltas after the block start, so a thinking block
+/// is emitted at block stop (v0.4.28; before, the deltas were dropped and the
+/// block went back to the API empty and unsigned).
+#[derive(Default)]
+struct SubagentStreamFold {
+    events: Vec<AssistantEvent>,
+    pending_tool: Option<(String, String, String)>,
+    pending_thinking: Option<(String, String)>,
+    stop_reason: Option<String>,
+    saw_stop: bool,
+}
+
+impl SubagentStreamFold {
+    fn apply(&mut self, event: ApiStreamEvent) -> Result<(), RuntimeError> {
+        match event {
+            ApiStreamEvent::MessageStart(start) => {
+                for block in start.message.content {
+                    push_output_block(block, &mut self.events, &mut self.pending_tool, true);
+                }
+            }
+            ApiStreamEvent::ContentBlockStart(start) => {
+                if let OutputContentBlock::Thinking {
+                    thinking,
+                    signature,
+                } = start.content_block
+                {
+                    self.pending_thinking = Some((thinking, signature));
+                } else {
+                    push_output_block(
+                        start.content_block,
+                        &mut self.events,
+                        &mut self.pending_tool,
+                        true,
+                    );
+                }
+            }
+            ApiStreamEvent::ContentBlockDelta(delta) => match delta.delta {
+                ContentBlockDelta::TextDelta { text } => {
+                    if !text.is_empty() {
+                        self.events.push(AssistantEvent::TextDelta(text));
+                    }
+                }
+                ContentBlockDelta::InputJsonDelta { partial_json } => {
+                    if let Some((_, _, input)) = &mut self.pending_tool {
+                        api::append_tool_input_chunk(input, &partial_json);
+                    }
+                }
+                ContentBlockDelta::ThinkingDelta { thinking } => {
+                    if let Some((text, _)) = &mut self.pending_thinking {
+                        text.push_str(&thinking);
+                    }
+                }
+                ContentBlockDelta::SignatureDelta { signature } => {
+                    if let Some((_, current)) = &mut self.pending_thinking {
+                        *current = signature;
+                    }
+                }
+            },
+            ApiStreamEvent::ContentBlockStop(_) => {
+                if let Some((id, name, input)) = self.pending_tool.take() {
+                    self.events.push(AssistantEvent::ToolUse { id, name, input });
+                }
+                if let Some((thinking, signature)) = self.pending_thinking.take() {
+                    self.events.push(AssistantEvent::Thinking {
+                        thinking,
+                        signature,
+                    });
+                }
+            }
+            ApiStreamEvent::MessageDelta(delta) => {
+                if delta.delta.stop_reason.is_some() {
+                    self.stop_reason.clone_from(&delta.delta.stop_reason);
+                }
+                self.events.push(AssistantEvent::Usage(TokenUsage {
+                    input_tokens: delta.usage.input_tokens,
+                    output_tokens: delta.usage.output_tokens,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                }));
+            }
+            ApiStreamEvent::MessageStop(_) => {
+                self.saw_stop = true;
+                self.events.push(AssistantEvent::MessageStop);
+            }
+            ApiStreamEvent::Error(e) => {
+                let msg = e
+                    .error
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("stream error")
+                    .to_string();
+                return Err(RuntimeError::new(msg));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -2619,6 +2697,9 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
                         thinking: thinking.clone(),
                         signature: signature.clone(),
                     },
+                    ContentBlock::RedactedThinking { data } => {
+                        InputContentBlock::RedactedThinking { data: data.clone() }
+                    }
                 })
                 .collect::<Vec<_>>();
             (!content.is_empty()).then(|| InputMessage {
@@ -2660,6 +2741,9 @@ fn push_output_block(
                 thinking,
                 signature,
             });
+        }
+        OutputContentBlock::RedactedThinking { data } => {
+            events.push(AssistantEvent::RedactedThinking { data });
         }
     }
 }
@@ -4239,6 +4323,8 @@ mod tests {
     /// v0.4.23: web_fetch/web_search tests drive LOCAL mock servers through
     /// reqwest — a developer shell's http(s)_proxy routes 127.0.0.1 through
     /// the proxy and the tests fail (observed live). Scrub once per process.
+    static WEB_SEARCH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn scrub_proxy_env() {
         static ONCE: std::sync::Once = std::sync::Once::new();
         ONCE.call_once(|| {
@@ -4267,6 +4353,116 @@ mod tests {
             .expect("time")
             .as_nanos();
         std::env::temp_dir().join(format!("clawd-tools-{unique}-{name}"))
+    }
+
+    fn fold_sse(frames: &[serde_json::Value]) -> Vec<AssistantEvent> {
+        let mut fold = super::SubagentStreamFold::default();
+        for frame in frames {
+            let event: super::ApiStreamEvent =
+                serde_json::from_value(frame.clone()).expect("stream event");
+            fold.apply(event).expect("fold");
+        }
+        fold.events
+    }
+
+    /// v0.4.28: a subagent's thinking block keeps its streamed text and
+    /// signature — including a block whose text is empty and only the
+    /// signature arrives — and sits before the tool call it led to.
+    #[test]
+    fn subagent_stream_keeps_thinking_text_and_signature() {
+        let events = fold_sse(&[
+            json!({"type":"content_block_start","index":0,
+                   "content_block":{"type":"thinking","thinking":"","signature":""}}),
+            json!({"type":"content_block_delta","index":0,
+                   "delta":{"type":"thinking_delta","thinking":"check "}}),
+            json!({"type":"content_block_delta","index":0,
+                   "delta":{"type":"thinking_delta","thinking":"the file"}}),
+            json!({"type":"content_block_delta","index":0,
+                   "delta":{"type":"signature_delta","signature":"sig-1"}}),
+            json!({"type":"content_block_stop","index":0}),
+            json!({"type":"content_block_start","index":1,
+                   "content_block":{"type":"thinking","thinking":"","signature":""}}),
+            json!({"type":"content_block_delta","index":1,
+                   "delta":{"type":"signature_delta","signature":"sig-only"}}),
+            json!({"type":"content_block_stop","index":1}),
+            json!({"type":"content_block_start","index":2,
+                   "content_block":{"type":"tool_use","id":"toolu_1","name":"read_file","input":{}}}),
+            json!({"type":"content_block_delta","index":2,
+                   "delta":{"type":"input_json_delta","partial_json":"{}"}}),
+            json!({"type":"content_block_delta","index":2,
+                   "delta":{"type":"input_json_delta","partial_json":"{\"path\":"}}),
+            json!({"type":"content_block_delta","index":2,
+                   "delta":{"type":"input_json_delta","partial_json":"\"a.txt\"}"}}),
+            json!({"type":"content_block_stop","index":2}),
+            json!({"type":"message_stop"}),
+        ]);
+        assert_eq!(
+            events,
+            vec![
+                AssistantEvent::Thinking {
+                    thinking: "check the file".to_string(),
+                    signature: "sig-1".to_string(),
+                },
+                AssistantEvent::Thinking {
+                    thinking: String::new(),
+                    signature: "sig-only".to_string(),
+                },
+                AssistantEvent::ToolUse {
+                    id: "toolu_1".to_string(),
+                    name: "read_file".to_string(),
+                    input: r#"{"path":"a.txt"}"#.to_string(),
+                },
+                AssistantEvent::MessageStop,
+            ]
+        );
+    }
+
+    /// v0.4.28: encrypted thinking is carried through, and a response whose
+    /// whole cap went to thinking is an error rather than an empty result.
+    #[test]
+    fn subagent_stream_carries_redacted_thinking_and_flags_an_exhausted_cap() {
+        let frames = [
+            json!({"type":"content_block_start","index":0,
+                   "content_block":{"type":"redacted_thinking","data":"ENCRYPTED"}}),
+            json!({"type":"content_block_stop","index":0}),
+            json!({"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},
+                   "usage":{"input_tokens":5,"output_tokens":9}}),
+            json!({"type":"message_stop"}),
+        ];
+        let mut fold = super::SubagentStreamFold::default();
+        for frame in &frames {
+            fold.apply(serde_json::from_value(frame.clone()).expect("event"))
+                .expect("fold");
+        }
+        assert_eq!(
+            fold.events[0],
+            AssistantEvent::RedactedThinking {
+                data: "ENCRYPTED".to_string()
+            }
+        );
+        let error = runtime::ensure_answer_within_output_cap(
+            &fold.events,
+            fold.stop_reason.as_deref(),
+            || api::output_cap_exhausted_message(32_000),
+        )
+        .expect_err("cap exhausted before an answer");
+        assert!(error.to_string().contains("ARIS_MAX_TOKENS"), "{error}");
+
+        // an answer that merely got cut off is still an answer
+        let mut answered = fold.events.clone();
+        answered.push(AssistantEvent::TextDelta("partial".to_string()));
+        assert!(runtime::ensure_answer_within_output_cap(
+            &answered,
+            Some("max_tokens"),
+            || unreachable!()
+        )
+        .is_ok());
+        assert!(
+            runtime::ensure_answer_within_output_cap(&fold.events, Some("end_turn"), || {
+                unreachable!()
+            })
+            .is_ok()
+        );
     }
 
     /// v0.4.24: the subagent availability chain walks Opus 5 → 4.8 → 4.7 and
@@ -4973,6 +5169,10 @@ mod tests {
 
     #[test]
     fn web_search_extracts_and_filters_results() {
+        // both tests point CLAWD_WEB_SEARCH_BASE_URL at their own server
+        let _guard = WEB_SEARCH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         scrub_proxy_env();
         let server = TestServer::spawn(Arc::new(|request_line: &str| {
             assert!(request_line.contains("GET /search?q=rust+web+search "));
@@ -5018,6 +5218,10 @@ mod tests {
 
     #[test]
     fn web_search_handles_generic_links_and_invalid_base_url() {
+        // both tests point CLAWD_WEB_SEARCH_BASE_URL at their own server
+        let _guard = WEB_SEARCH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         scrub_proxy_env();
         let _guard = env_lock()
             .lock()

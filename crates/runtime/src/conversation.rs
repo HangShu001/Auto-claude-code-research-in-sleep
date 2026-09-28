@@ -32,6 +32,9 @@ pub enum AssistantEvent {
         thinking: String,
         signature: String,
     },
+    RedactedThinking {
+        data: String,
+    },
     Usage(TokenUsage),
     MessageStop,
 }
@@ -213,6 +216,15 @@ where
     #[must_use]
     pub fn with_auto_compaction_input_tokens_threshold(mut self, threshold: u32) -> Self {
         self.auto_compaction_input_tokens_threshold = threshold;
+        self
+    }
+
+    /// v0.4.28: honour `autoCompactEnabled: false`. `/compact` is unaffected.
+    #[must_use]
+    pub fn with_auto_compaction_enabled(mut self, enabled: bool) -> Self {
+        if !enabled {
+            self.auto_compaction_input_tokens_threshold = u32::MAX;
+        }
         self
     }
 
@@ -447,6 +459,24 @@ where
     }
 }
 
+/// v0.4.28: a response that stopped on `max_tokens` with no text and no tool
+/// call (the cap went to thinking) is an error the user can act on, not a
+/// finished turn.
+pub fn ensure_answer_within_output_cap(
+    events: &[AssistantEvent],
+    stop_reason: Option<&str>,
+    exhausted_message: impl FnOnce() -> String,
+) -> Result<(), RuntimeError> {
+    let answered = events.iter().any(|event| {
+        matches!(event, AssistantEvent::TextDelta(text) if !text.trim().is_empty())
+            || matches!(event, AssistantEvent::ToolUse { .. })
+    });
+    if stop_reason == Some("max_tokens") && !answered {
+        return Err(RuntimeError::new(exhausted_message()));
+    }
+    Ok(())
+}
+
 #[must_use]
 pub fn auto_compaction_threshold_from_env() -> u32 {
     parse_auto_compaction_threshold(
@@ -482,6 +512,10 @@ fn build_assistant_message(
             AssistantEvent::Thinking { thinking, signature } => {
                 flush_text_block(&mut text, &mut blocks);
                 blocks.push(ContentBlock::Thinking { thinking, signature });
+            }
+            AssistantEvent::RedactedThinking { data } => {
+                flush_text_block(&mut text, &mut blocks);
+                blocks.push(ContentBlock::RedactedThinking { data });
             }
             AssistantEvent::Usage(value) => usage = Some(value),
             AssistantEvent::MessageStop => {
@@ -1087,6 +1121,57 @@ mod tests {
             .expect("turn should succeed");
         assert_eq!(summary.auto_compaction, None);
         assert_eq!(runtime.session().messages.len(), 2);
+    }
+
+    #[test]
+    fn auto_compaction_can_be_switched_off() {
+        struct SimpleApi;
+        impl ApiClient for SimpleApi {
+            fn stream(
+                &mut self,
+                _request: ApiRequest,
+            ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+                Ok(vec![
+                    AssistantEvent::TextDelta("done".to_string()),
+                    AssistantEvent::Usage(TokenUsage {
+                        input_tokens: 120_000,
+                        output_tokens: 4,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0,
+                    }),
+                    AssistantEvent::MessageStop,
+                ])
+            }
+        }
+
+        let build = |enabled: bool| {
+            let session = Session {
+                version: 1,
+                messages: vec![
+                    crate::session::ConversationMessage::user_text("one"),
+                    crate::session::ConversationMessage::assistant(vec![ContentBlock::Text {
+                        text: "two".to_string(),
+                    }]),
+                    crate::session::ConversationMessage::user_text("three"),
+                    crate::session::ConversationMessage::assistant(vec![ContentBlock::Text {
+                        text: "four".to_string(),
+                    }]),
+                ],
+            };
+            ConversationRuntime::new(
+                session,
+                SimpleApi,
+                StaticToolExecutor::new(),
+                PermissionPolicy::new(PermissionMode::DangerFullAccess),
+                vec!["system".to_string()],
+            )
+            .with_auto_compaction_input_tokens_threshold(100_000)
+            .with_auto_compaction_enabled(enabled)
+        };
+        let summary = build(true).run_turn("trigger", None).expect("turn");
+        assert!(summary.auto_compaction.is_some());
+        let summary = build(false).run_turn("trigger", None).expect("turn");
+        assert_eq!(summary.auto_compaction, None);
     }
 
     #[test]
