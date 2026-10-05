@@ -365,6 +365,10 @@ claude
 > /meta-optimize                               # 元优化：分析使用记录 → 提出技能改进方案
 ```
 
+> **可选 Grok CLI 桥接：** [`grok-exec`](mcp-servers/grok-exec/README.md) 复用已有 CLI 登录，提供 `grok` / `grok-reply`，默认 `grok-4.7` + `xhigh`，支持会话续接、进度与取消。
+
+> **可选 Antigravity CLI 桥接：** [`antigravity-exec`](mcp-servers/antigravity-exec/README.md) 复用已有 CLI 登录，提供 `antigravity` / `antigravity-reply`，默认 Gemini 3.8 Flash（High），支持原生会话续接。两者供用户明确点名时直接调用；安装不会改动现有 skills 的 reviewer 路由，`— reviewer: agy` 仍使用 `gemini-review`。
+
 > 不需要全部 83 个 skill？见下方[选择性安装](#install-skills)按组/按 skill 挑选。
 
 <details>
