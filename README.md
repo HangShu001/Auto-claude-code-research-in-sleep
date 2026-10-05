@@ -407,6 +407,10 @@ claude
 
 > Don't need all 83 skills? See [Selective install](#install-skills) below for group/skill-level picks.
 
+> **Optional Grok CLI bridge:** [`grok-exec`](mcp-servers/grok-exec/README.md) exposes `grok` / `grok-reply` using your existing Grok CLI login, with `grok-4.7` + `xhigh` defaults, persistent sessions, progress and cancellation. It is a separate MCP service; installing it does not change the reviewer routing of existing skills.
+
+> **Optional Antigravity CLI bridge:** [`antigravity-exec`](mcp-servers/antigravity-exec/README.md) exposes `antigravity` / `antigravity-reply` through your existing CLI login, defaulting to Gemini 3.8 Flash (High). Supports native conversation resume and cancellation; existing reviewer routes stay unchanged. These are direct consultation tools, not new `— reviewer:` values; `— reviewer: agy` still uses `gemini-review`.
+
 <details>
 <summary><b>📚 Research Wiki (optional)</b> — one-line init for persistent memory across sessions; see <a href="#-research-wiki--persistent-research-memory">full Research Wiki section</a></summary>
 
