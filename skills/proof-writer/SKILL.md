@@ -77,8 +77,10 @@ materially help establish correctness, invoke
 current attempt, and known dependencies. It develops the proof as well as its
 formal implementation. Return the checked scope, exported theorem and remaining
 obligations to this proof package. A partial result closes only its corresponding
-obligation. Ordinary proof drafting does not require Lean; difficulty alone does
-not trigger it.
+obligation. When called by `lean-formalize` to develop a missing mathematical
+argument, return that argument and remaining gaps to the calling Lean run;
+do not invoke `lean-formalize` recursively. Ordinary proof drafting does not
+require Lean; difficulty alone does not trigger it.
 
 ### Step 3: Feasibility Triage
 Before writing a proof, classify the claim into exactly one status:

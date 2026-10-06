@@ -41,8 +41,11 @@ consultation, not ARIS-wide routing.
 - **Claude review MCP:** use `review` / `review_reply`, or the asynchronous
   `review_start` / `review_reply_start` plus `review_status` for long reviews.
   For artifact-path review, pass `tools: "Read,Grep,Glob"` on every call, including
-  replies; file tools are otherwise disabled. Use the registered tool schema
-  rather than copying another bridge's arguments. Keep review read-only.
+  replies; file tools are otherwise disabled. Pass the saved `threadId` (or the
+  bridge's `thread_id` alias) to `review_reply` / `review_reply_start` as well as
+  the prompt and file-tool setting; continuation requires that session identity.
+  Use the registered tool schema for other arguments rather than copying another
+  bridge's fields. Keep review read-only.
 - **Gemini review MCP:** its `review*` tools have their own saved conversation.
   With the API backend, include the relevant primary source text, definitions,
   caller and logs in the prompt; a remote model cannot read local paths. The

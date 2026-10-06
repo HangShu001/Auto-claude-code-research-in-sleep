@@ -62,9 +62,11 @@ Do not reinstall tools, change dependencies, or start a new proof framework when
 the existing environment is suitable. Resolve APIs against the pinned library.
 
 Use the existing proof route when it works. If the mathematical argument itself
-is missing, isolate that obligation and use `proof-writer` or ordinary proof work;
-syntax automation cannot discharge an unproved premise. Do not promise that an
-arbitrary open problem can be formalized or solved.
+is missing, isolate that obligation and use `proof-writer` or ordinary proof work.
+A delegated `proof-writer` task develops that argument and returns its proof or
+remaining gap to this run; it must not invoke `lean-formalize` again. Syntax
+automation cannot discharge an unproved premise. Do not promise that an arbitrary
+open problem can be formalized or solved.
 
 ### Start or resume the right work
 
