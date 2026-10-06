@@ -1,6 +1,6 @@
 # ARIS Skills Catalog
 
-Every skill that ships with ARIS, grouped by role. **83 skills** as of the
+Every skill that ships with ARIS, grouped by role. **84 skills** as of the
 latest update; new skills land via PR and get added to the table below.
 
 - Each `Skill` link goes to the canonical `SKILL.md` (the LLM-readable spec).
@@ -78,6 +78,7 @@ Orchestrating and independently auditing mathematical proofs.
 | Skill | Role | Requires |
 |---|---|---|
 | [`/proof-orchestrator`](../skills/proof-orchestrator/SKILL.md) | Stateful proof-run orchestration: run directories, cross-run continuation, manual GPT Pro handoff packages, optional DeepSeek second opinion (additional evidence only — `/proof-writer` drafts proofs, `/proof-checker` owns verification and submission acceptance) | None by default; llm-chat MCP only for optional DeepSeek review |
+| [`/lean-formalize`](../skills/lean-formalize/SKILL.md) | Formalize, continue, or audit a Lean proof when requested or useful for a substantial mathematical obligation; preserve the original statement, connect actual inputs, and verify the final declaration and its axioms | Lean project/toolchain; authorized cross-family reviewer for substantial proof checkpoints |
 
 ## 🧪 Experiments & Infrastructure
 

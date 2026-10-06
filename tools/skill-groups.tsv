@@ -60,6 +60,7 @@ skill	formula-derivation	theory	-	公式推导与理论线组织
 skill	proof-writer	theory	-	撰写严格数学证明
 skill	proof-checker	theory	render-html	证明缺口审查与修复
 skill	proof-orchestrator	theory	-	本地优先的证明编排、人工 GPT Pro 交接与显式 DeepSeek 复审
+skill	lean-formalize	theory	-	按需 Lean 形式化、续写与审计：保真原命题、接通证明并核查最终定理
 skill	experiment-plan	experiments	-	claim 驱动的实验路线图
 skill	experiment-bridge	experiments	run-experiment,experiment-queue,monitor-experiment,training-check,ablation-planner	W1.5:从实验计划到跑通初步结果
 skill	research-implement-feature	experiments	-	从"给我实现 X"直接开建：先跑通脊柱再逐级加功能，全程申报假设
