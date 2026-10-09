@@ -1,7 +1,7 @@
 # READMEDOU.md — ARIS 落地实操指南（我的实现手册）
 
 > 本仓库 fork 自 [`wanshuiyin/Auto-claude-code-research-in-sleep`](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep)（ARIS ⚔️ 梦中科研）。
-> 本文档是一份**面向我自己**的中文实操手册：从零把 ARIS 跑起来、按我的环境（Windows + Claude Code + DeepSeek 中转 + 本机 RTX5070）完成配置、并说明每条工作流怎么用。
+> 本文档是一份**面向我自己**的中文实操手册：从零把 ARIS 跑起来、按我的环境（Windows + Claude Code + DeepSeek 中转 + 本机独显）完成配置、并说明每条工作流怎么用。
 > 所有命令与配置均取自官方 `README.md` 与 `docs/` 目录，关键处标注了原文来源，可追溯。
 
 ---
@@ -26,8 +26,8 @@ ARIS（**A**utonomous **R**esearch via **A**dversarial **M**ulti-Agent **C**olla
 | Node.js 18+ | `claude` CLI 运行依赖 | 已装（含 Claude Code） | ✅ |
 | Python 3.x | 审稿 MCP 桥接、工具脚本 | Anaconda（Py3.12） | ✅ |
 | Claude Code CLI | 执行端 | 已装（DeepSeek 中转） | ✅ |
-| GPU | 跑实验用（可选） | 本机 RTX5070 8GB | ✅ 够跑小实验 |
-| API key | 见下方"模型组合" | DeepSeek key | ✅ |
+| GPU | 跑实验用（可选） | 本机有独显 | ✅ |
+| API key | 见下方"模型组合" | 已有 | ✅ |
 
 > 没有 GPU 也能装：Review 和改写类功能不受影响，只有需要跑实验的修复会被跳过（标记"需人工跟进"）。
 
@@ -159,17 +159,17 @@ claude mcp add llm-chat -s user -- python3 "$HOME/aris_repo/mcp-servers/llm-chat
 
 ---
 
-## 六、GPU 配置（本机 RTX5070 直接访问）
+## 六、GPU 配置（本机直连 GPU）
 
 在**论文项目根目录的 `CLAUDE.md`** 里加这段（我本机有 GPU，用"直接访问"模板；官方模板见 [docs/GPU_SETUP_CN.md](docs/GPU_SETUP_CN.md)）：
 
 ```markdown
 ## GPU 环境
 - 这台机器有直接 GPU 访问（不需要 SSH）
-- GPU：RTX 5070 8GB
-- 实验环境：`deep_learning`（Python 3.12 + PyTorch，Anaconda）
-- 激活命令：`conda activate deep_learning`
-- 代码目录：`D:\1_study\projects\experiments\`
+- GPU：`YOUR_GPU`（如 RTX 5070 8GB，替换为你的实际型号）
+- 实验环境：`YOUR_CONDA_ENV`（Python 3 + PyTorch 的 conda 环境）
+- 激活命令：`conda activate YOUR_CONDA_ENV`
+- 代码目录：`YOUR_CODE_DIR`（替换为你的实际代码目录）
 - 后台运行用 `screen`（WSL）或 `start /b`（Windows）
 ```
 
